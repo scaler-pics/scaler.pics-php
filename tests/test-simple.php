@@ -3,7 +3,7 @@
 
 require './Scaler.php';
 
-$apiKey = $argv[1] ?? 'ueBB1aH3TtSs-HG5zM4P2iShvnRYvUipl93vjJPFgXM';
+$apiKey = $argv[1] ?? '';
 
 $scaler = new Scaler($apiKey, 'test-data/access-token.txt');
 
