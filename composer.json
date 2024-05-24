@@ -1,0 +1,9 @@
+{
+	"name": "scaler/scaler",
+	"description": "Scaler.pics API helper library for efficient transforming photos and images",
+	"require": {
+		"php": ">=7.4",
+		"guzzlehttp/guzzle": "^7.0",
+		"firebase/php-jwt": "^6.10"
+	}
+}
