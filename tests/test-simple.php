@@ -5,7 +5,7 @@ require './Scaler.php';
 
 $apiKey = $argv[1] ?? '';
 
-$scaler = new Scaler($apiKey, 'test-data/access-token.txt');
+$scaler = new Scaler($apiKey, './test-data/access-token.txt');
 
 $options = [
 	'input' => ['localPath' => 'test-data/test.heic'],

@@ -70,7 +70,7 @@ class Scaler
 		}
 
 		$json = json_decode($res->getBody()->getContents(), true);
-		$signMs = microtime(true) - $startSignUrl;
+		$signMs = (microtime(true) - $startSignUrl) * 1000;
 		$url = $json['url'];
 
 		$headers = [];
@@ -102,7 +102,7 @@ class Scaler
 		$deleteUrl = $transfromResponse['deleteUrl'];
 		$apiTimeStats = $transfromResponse['timeStats'];
 
-		$sendImageMs = $endTransformTime - $startTransformTime - $apiTimeStats['transformMs'] - ($apiTimeStats['uploadImagesMs'] ?? 0);
+		$sendImageMs = (($endTransformTime - $startTransformTime) * 1000) - $apiTimeStats['transformMs'] - ($apiTimeStats['uploadImagesMs'] ?? 0);
 		$startGetImages = microtime(true);
 
 		$promises = [];
@@ -121,7 +121,7 @@ class Scaler
 		}
 
 		$outputImageResults = $promises;
-		$getImagesMs = $apiTimeStats['uploadImagesMs'] ?? (microtime(true) - $startGetImages);
+		$getImagesMs = $apiTimeStats['uploadImagesMs'] ?? (microtime(true) - $startGetImages) * 1000;
 		$deleteBody = ['images' => array_map(function ($dest) {
 			return $dest['fileId'];
 		}, array_filter($outputApiImages, function ($dest) {
@@ -135,7 +135,7 @@ class Scaler
 			'json' => $deleteBody,
 		]);
 
-		$totalMs = microtime(true) - $start;
+		$totalMs = (microtime(true) - $start) * 1000;
 		$outputImages = array_map(function ($dest, $i) use ($outputImageResults) {
 			return [
 				'fit' => $dest['fit'],
