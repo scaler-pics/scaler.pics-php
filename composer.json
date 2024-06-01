@@ -1,9 +1,36 @@
 {
 	"name": "scaler/scaler",
 	"description": "Scaler.pics API helper library for efficient transforming photos and images",
+	"type": "library",
+	"keywords": [
+		"image",
+		"photo",
+		"transform",
+		"resize",
+		"crop",
+		"scale",
+		"optimize",
+		"compress",
+		"convert",
+		"webp",
+		"avif",
+		"heif",
+		"heic",
+		"jpeg",
+		"png",
+		"gif",
+		"tiff",
+		"bmp"
+	],
+	"license": "MIT",
+	"homepage": "https://scaler.pics",
 	"require": {
 		"php": ">=7.4",
-		"guzzlehttp/guzzle": "^7.0",
-		"firebase/php-jwt": "^6.10"
+		"guzzlehttp/guzzle": "^7.0"
+	},
+	"autoload": {
+		"psr-4": {
+			"Scaler\\": "src/"
+		}
 	}
 }

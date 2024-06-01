@@ -1,11 +1,12 @@
 <?php
 
+namespace Scaler;
+
 require 'vendor/autoload.php';
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7;
-use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
+use Exception;
 
 class Scaler
 {
@@ -39,7 +40,6 @@ class Scaler
 			$outputs = $options['output'];
 		}
 
-		var_dump($outputs);
 		$apiOutputs = array_map(function ($out) {
 			return [
 				'fit' => $out['fit'],
