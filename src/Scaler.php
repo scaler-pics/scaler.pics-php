@@ -246,7 +246,7 @@ class Scaler
 			foreach ($outputApiImages as $i => $dest) {
 				if (isset($dest['downloadUrl'])) {
 					$dlUrl = $dest['downloadUrl'];
-					$promises[] = new Promise(function () use (&$promise, $dlUrl, $outputs, $i, $outputApiImages) {
+					$finalPromise = new Promise(function () use (&$finalPromise, $dlUrl, $outputs, $i, $outputApiImages, $deleteUrl, $dest) {
 						if (isset($outputs[$i]['imageDelivery']['saveToLocalPath'])) {
 							$destPath = $outputs[$i]['imageDelivery']['saveToLocalPath'];
 							$dlPromise = $this->downloadImageAsync($dlUrl, $destPath);
@@ -255,115 +255,65 @@ class Scaler
 						}
 						$dlResult = $dlPromise->wait();
 
-						$getImagesMs = $apiTimeStats['uploadImagesMs'] ?? (microtime(true) - $startGetImages) * 1000;
 						$deleteBody = ['images' => array_map(function ($dest) {
 							return $dest['fileId'];
 						}, array_filter($outputApiImages, function ($dest) {
 							return isset($dest['fileId']);
 						}))];
 		
-						$this->client->delete($deleteUrl, [
+						$deletePromise = $this->client->deleteAsync($deleteUrl, [
 							'headers' => [
 								'Content-Type' => 'application/json',
 							],
 							'json' => $deleteBody,
 						]);
-						echo "after delete\n";
-						$totalMs = (microtime(true) - $start) * 1000;
-						$outputImages = array_map(function ($dest, $i) use ($outputImageResults) {
-							return [
-								'fit' => $dest['fit'],
-								'pixelSize' => $dest['pixelSize'],
-								'image' => $outputImageResults[$i]['image'],
-							];
-						}, $outputApiImages, array_keys($outputApiImages));
-						echo "before inner resolve... where promis is " . $promise . "\n";
-						$promise->resolve([
-							'inputImage' => $inputApiImage,
-							'outputImage' => is_array($options['output']) ? $outputImages : $outputImages[0],
-							'timeStats' => [
-								'signMs' => $signMs,
-								'sendImageMs' => $sendImageMs,
-								'transformMs' => $apiTimeStats['transformMs'],
-								'getImagesMs' => $getImagesMs,
-								'totalMs' => $totalMs,
-							],
+						$deletePromise->then(function ($res) {
+							echo "delete response " . $res->getStatusCode() . "\n";
+						});
+						// $deletePromise->wait(); // do I need to wait for this?
+
+						$finalPromise->resolve([
+							'fit' => $dest['fit'],
+							'pixelSize' => $dest['pixelSize'],
+							'image' => $dlResult['image'],
 						]);
+
+						// $finalPromise->resolve([
+						// 	'inputImage' => $inputApiImage,
+						// 	'outputImage' => is_array($options['output']) ? $outputImages : $outputImages[0],
+						// 	'timeStats' => [
+						// 		'signMs' => $signMs,
+						// 		'sendImageMs' => $sendImageMs,
+						// 		'transformMs' => $apiTimeStats['transformMs'],
+						// 		'getImagesMs' => $getImagesMs,
+						// 		'totalMs' => $totalMs,
+						// 	],
+						// ]);
 						echo "after inner resolve\n";
 		
 					});
-					// if (isset($outputs[$i]['imageDelivery']['saveToLocalPath'])) {
-					// 	$destPath = $outputs[$i]['imageDelivery']['saveToLocalPath'];
-					// 	$dlPromise = $this->downloadImageAsync($dlUrl, $destPath);
-					// 	$promises[] = $this->downloadImageAsync($dlUrl, $destPath);
-					// } else {
-					// 	$promises[] = $this->downloadImageBufferAsync($dlUrl);
-					// }
+					$promises[] = $finalPromise;
 				} else {
 					$promises[] = new FulfilledPromise(['image' => 'uploaded']);
 				}
 			}
 
-			$responses = PromiseUtils::settle($promises)->wait();
+			$responses = PromiseUtils::unwrap($promises);
 
+			$getImagesMs = $apiTimeStats['uploadImagesMs'] ?? (microtime(true) - $startGetImages) * 1000;
+			$totalMs = (microtime(true) - $start) * 1000;
 
-
-			$outputImageResults = [];
-
-			$eachPromise = new EachPromise($promises, [
-				'concurrency' => count($promises),
-				'fulfilled' => function ($outputImageResult) use (&$outputImageResults) {
-					$outputImageResults[] = $outputImageResult;
-				},
-				'rejected' => function ($reason) use (&$promise) {
-					$promise->reject($reason);
-				}
+			$promise->resolve([
+				'inputImage' => $inputApiImage,
+				'outputImage' => is_array($options['output']) ? $responses : $responses[0],
+				'timeStats' => [
+					'signMs' => $signMs,
+					'sendImageMs' => $sendImageMs,
+					'transformMs' => $apiTimeStats['transformMs'],
+					'getImagesMs' => $getImagesMs,
+					'totalMs' => $totalMs,
+				],
 			]);
-
-			$eachPromise->promise()->then(function () use ($promise, $options, $signMs, $inputApiImage, $outputApiImages, $apiTimeStats, $sendImageMs, $startGetImages, $deleteUrl, $start, &$outputImageResults) {
-				echo "inside each promise\n";
-				$getImagesMs = $apiTimeStats['uploadImagesMs'] ?? (microtime(true) - $startGetImages) * 1000;
-				$deleteBody = ['images' => array_map(function ($dest) {
-					return $dest['fileId'];
-				}, array_filter($outputApiImages, function ($dest) {
-					return isset($dest['fileId']);
-				}))];
-
-				$this->client->delete($deleteUrl, [
-					'headers' => [
-						'Content-Type' => 'application/json',
-					],
-					'json' => $deleteBody,
-				]);
-				echo "after delete\n";
-				$totalMs = (microtime(true) - $start) * 1000;
-				$outputImages = array_map(function ($dest, $i) use ($outputImageResults) {
-					return [
-						'fit' => $dest['fit'],
-						'pixelSize' => $dest['pixelSize'],
-						'image' => $outputImageResults[$i]['image'],
-					];
-				}, $outputApiImages, array_keys($outputApiImages));
-				echo "before inner resolve... where promis is " . $promise . "\n";
-				$promise->resolve([
-					'inputImage' => $inputApiImage,
-					'outputImage' => is_array($options['output']) ? $outputImages : $outputImages[0],
-					'timeStats' => [
-						'signMs' => $signMs,
-						'sendImageMs' => $sendImageMs,
-						'transformMs' => $apiTimeStats['transformMs'],
-						'getImagesMs' => $getImagesMs,
-						'totalMs' => $totalMs,
-					],
-				]);
-				echo "after inner resolve\n";
-			})->otherwise(function ($e) use ($promise) {
-				echo "inside each promise error " . $e->getMessage() . "\n";
-				$promise->reject($e);
-			});
-			echo "before each promise wait\n";
-			$eachPromise->promise()->wait();
-			echo "after each promise wait\n";
 		});
 		return $promise;
 	}
