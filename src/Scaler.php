@@ -6,6 +6,10 @@ require 'vendor/autoload.php';
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7;
+use GuzzleHttp\Promise\Promise;
+use GuzzleHttp\Promise\EachPromise;
+use GuzzleHttp\Promise\FulfilledPromise;
+use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Exception;
 
 class Scaler
@@ -155,6 +159,186 @@ class Scaler
 				'totalMs' => $totalMs,
 			],
 		];
+	}
+
+	public function transformAsync($options)
+	{
+		$promise = new Promise(function () use (&$promise, $options) {
+			$this->refreshAccessTokenIfNeeded();
+			$start = microtime(true);
+
+			if (!isset($options['output'])) {
+				throw new Exception('No output provided');
+			}
+
+			if (array_keys($options['output']) !== range(0, count($options['output']) - 1)) {
+				$outputs = [$options['output']];
+			} else {
+				$outputs = $options['output'];
+			}
+
+			$apiOutputs = array_map(function ($out) {
+				return [
+					'fit' => $out['fit'],
+					'type' => $out['type'],
+					'quality' => $out['quality'] ?? null,
+					'upload' => $out['imageDelivery']['upload'] ?? null,
+					'crop' => $out['crop'] ?? null,
+				];
+			}, $outputs);
+
+			$options2 = [
+				'input' => $options['input']['remoteUrl'] ?? 'body',
+				'output' => $apiOutputs,
+			];
+
+			$startSignUrl = microtime(true);
+			$res = $this->client->post($this->signUrl, [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $this->accessToken,
+					'Content-Type' => 'application/json',
+				],
+				'json' => $options2,
+			]);
+			echo "past sign url " . $res->getStatusCode() . "\n";
+			if ($res->getStatusCode() !== 200) {
+				$text = $res->getBody()->getContents();
+				throw new Exception("Failed to get transform url. status: " . $res->getStatusCode() . ", text: " . $text);
+			}
+
+			$json = json_decode($res->getBody()->getContents(), true);
+			$signMs = (microtime(true) - $startSignUrl) * 1000;
+			$url = $json['url'];
+
+			$headers = [];
+			$body = null;
+
+			if (isset($options['input']['buffer'])) {
+				$headers['Content-Type'] = 'application/x-octet-stream';
+				$body = $options['input']['buffer'];
+			} elseif (isset($options['input']['localPath'])) {
+				$headers['Content-Type'] = 'application/x-octet-stream';
+				$body = Psr7\Utils::tryFopen($options['input']['localPath'], 'r');
+			}
+
+			$startTransformTime = microtime(true);
+			$res2 = $this->client->post($url, [
+				'headers' => $headers,
+				'body' => $body,
+			]);
+			echo "past transform call" . $res2->getStatusCode() . "\n";
+			if ($res2->getStatusCode() !== 200) {
+				$text = $res2->getBody()->getContents();
+				throw new Exception("Failed to transform image. status: " . $res2->getStatusCode() . ", text: " . $text);
+			}
+
+			$endTransformTime = microtime(true);
+			$transfromResponse = json_decode($res2->getBody()->getContents(), true);
+			$inputApiImage = $transfromResponse['inputImage'];
+			$outputApiImages = $transfromResponse['outputImages'];
+			$deleteUrl = $transfromResponse['deleteUrl'];
+			$apiTimeStats = $transfromResponse['timeStats'];
+
+			$sendImageMs = (($endTransformTime - $startTransformTime) * 1000) - $apiTimeStats['transformMs'] - ($apiTimeStats['uploadImagesMs'] ?? 0);
+			$startGetImages = microtime(true);
+
+			$promises = [];
+			foreach ($outputApiImages as $i => $dest) {
+				if (isset($dest['downloadUrl'])) {
+					$dlUrl = $dest['downloadUrl'];
+					if (isset($outputs[$i]['imageDelivery']['saveToLocalPath'])) {
+						$destPath = $outputs[$i]['imageDelivery']['saveToLocalPath'];
+						$promises[] = $this->downloadImageAsync($dlUrl, $destPath);
+					} else {
+						$promises[] = $this->downloadImageBufferAsync($dlUrl);
+					}
+				} else {
+					$promises[] = new FulfilledPromise(['image' => 'uploaded']);
+				}
+			}
+
+			$responses = PromiseUtils::settle($promises)->wait();
+
+
+
+			$outputImageResults = [];
+
+			$eachPromise = new EachPromise($promises, [
+				'concurrency' => count($promises),
+				'fulfilled' => function ($outputImageResult) use (&$outputImageResults) {
+					$outputImageResults[] = $outputImageResult;
+				},
+				'rejected' => function ($reason) use (&$promise) {
+					$promise->reject($reason);
+				}
+			]);
+
+			$eachPromise->promise()->then(function () use ($promise, $options, $signMs, $inputApiImage, $outputApiImages, $apiTimeStats, $sendImageMs, $startGetImages, $deleteUrl, $start, &$outputImageResults) {
+				echo "inside each promise\n";
+				$getImagesMs = $apiTimeStats['uploadImagesMs'] ?? (microtime(true) - $startGetImages) * 1000;
+				$deleteBody = ['images' => array_map(function ($dest) {
+					return $dest['fileId'];
+				}, array_filter($outputApiImages, function ($dest) {
+					return isset($dest['fileId']);
+				}))];
+
+				$this->client->delete($deleteUrl, [
+					'headers' => [
+						'Content-Type' => 'application/json',
+					],
+					'json' => $deleteBody,
+				]);
+				echo "after delete\n";
+				$totalMs = (microtime(true) - $start) * 1000;
+				$outputImages = array_map(function ($dest, $i) use ($outputImageResults) {
+					return [
+						'fit' => $dest['fit'],
+						'pixelSize' => $dest['pixelSize'],
+						'image' => $outputImageResults[$i]['image'],
+					];
+				}, $outputApiImages, array_keys($outputApiImages));
+				echo "before inner resolve... where promis is " . $promise . "\n";
+				$promise->resolve([
+					'inputImage' => $inputApiImage,
+					'outputImage' => is_array($options['output']) ? $outputImages : $outputImages[0],
+					'timeStats' => [
+						'signMs' => $signMs,
+						'sendImageMs' => $sendImageMs,
+						'transformMs' => $apiTimeStats['transformMs'],
+						'getImagesMs' => $getImagesMs,
+						'totalMs' => $totalMs,
+					],
+				]);
+				echo "after inner resolve\n";
+			})->otherwise(function ($e) use ($promise) {
+				echo "inside each promise error " . $e->getMessage() . "\n";
+				$promise->reject($e);
+			});
+			echo "before each promise wait\n";
+			$eachPromise->promise()->wait();
+			echo "after each promise wait\n";
+		});
+		return $promise;
+	}
+
+	private function downloadImageAsync($url, $path)
+	{
+		return $this->client->getAsync($url, ['sink' => $path])->then(function ($res) use ($path) {
+			if ($res->getStatusCode() !== 200) {
+				throw new Exception("Failed to download image. status: " . $res->getStatusCode());
+			}
+			return ['image' => $path];
+		});
+	}
+
+	private function downloadImageBufferAsync($url)
+	{
+		return $this->client->getAsync($url)->then(function ($res) {
+			if ($res->getStatusCode() !== 200) {
+				throw new Exception("Failed to download image. status: " . $res->getStatusCode());
+			}
+			return ['image' => $res->getBody()->getContents()];
+		});
 	}
 
 	private function refreshAccessTokenIfNeeded()
