@@ -246,12 +246,59 @@ class Scaler
 			foreach ($outputApiImages as $i => $dest) {
 				if (isset($dest['downloadUrl'])) {
 					$dlUrl = $dest['downloadUrl'];
-					if (isset($outputs[$i]['imageDelivery']['saveToLocalPath'])) {
-						$destPath = $outputs[$i]['imageDelivery']['saveToLocalPath'];
-						$promises[] = $this->downloadImageAsync($dlUrl, $destPath);
-					} else {
-						$promises[] = $this->downloadImageBufferAsync($dlUrl);
-					}
+					$promises[] = new Promise(function () use (&$promise, $dlUrl, $outputs, $i, $outputApiImages) {
+						if (isset($outputs[$i]['imageDelivery']['saveToLocalPath'])) {
+							$destPath = $outputs[$i]['imageDelivery']['saveToLocalPath'];
+							$dlPromise = $this->downloadImageAsync($dlUrl, $destPath);
+						} else {
+							$dlPromise = $this->downloadImageBufferAsync($dlUrl);
+						}
+						$dlResult = $dlPromise->wait();
+
+						$getImagesMs = $apiTimeStats['uploadImagesMs'] ?? (microtime(true) - $startGetImages) * 1000;
+						$deleteBody = ['images' => array_map(function ($dest) {
+							return $dest['fileId'];
+						}, array_filter($outputApiImages, function ($dest) {
+							return isset($dest['fileId']);
+						}))];
+		
+						$this->client->delete($deleteUrl, [
+							'headers' => [
+								'Content-Type' => 'application/json',
+							],
+							'json' => $deleteBody,
+						]);
+						echo "after delete\n";
+						$totalMs = (microtime(true) - $start) * 1000;
+						$outputImages = array_map(function ($dest, $i) use ($outputImageResults) {
+							return [
+								'fit' => $dest['fit'],
+								'pixelSize' => $dest['pixelSize'],
+								'image' => $outputImageResults[$i]['image'],
+							];
+						}, $outputApiImages, array_keys($outputApiImages));
+						echo "before inner resolve... where promis is " . $promise . "\n";
+						$promise->resolve([
+							'inputImage' => $inputApiImage,
+							'outputImage' => is_array($options['output']) ? $outputImages : $outputImages[0],
+							'timeStats' => [
+								'signMs' => $signMs,
+								'sendImageMs' => $sendImageMs,
+								'transformMs' => $apiTimeStats['transformMs'],
+								'getImagesMs' => $getImagesMs,
+								'totalMs' => $totalMs,
+							],
+						]);
+						echo "after inner resolve\n";
+		
+					});
+					// if (isset($outputs[$i]['imageDelivery']['saveToLocalPath'])) {
+					// 	$destPath = $outputs[$i]['imageDelivery']['saveToLocalPath'];
+					// 	$dlPromise = $this->downloadImageAsync($dlUrl, $destPath);
+					// 	$promises[] = $this->downloadImageAsync($dlUrl, $destPath);
+					// } else {
+					// 	$promises[] = $this->downloadImageBufferAsync($dlUrl);
+					// }
 				} else {
 					$promises[] = new FulfilledPromise(['image' => 'uploaded']);
 				}
