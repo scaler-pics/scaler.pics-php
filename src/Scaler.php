@@ -7,7 +7,6 @@ require 'vendor/autoload.php';
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7;
 use GuzzleHttp\Promise\Promise;
-use GuzzleHttp\Promise\EachPromise;
 use GuzzleHttp\Promise\FulfilledPromise;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Exception;
@@ -244,23 +243,28 @@ class Scaler
 
 			$promises = [];
 			foreach ($outputApiImages as $i => $dest) {
+				echo 'adding dst image promise ' . $i . "\n";
 				if (isset($dest['downloadUrl'])) {
+					echo 'adding dl image promise ' . $i . "\n";
 					$dlUrl = $dest['downloadUrl'];
 					$finalPromise = new Promise(function () use (&$finalPromise, $dlUrl, $outputs, $i, $outputApiImages, $deleteUrl, $dest) {
+						$dlPromise = null;
 						if (isset($outputs[$i]['imageDelivery']['saveToLocalPath'])) {
 							$destPath = $outputs[$i]['imageDelivery']['saveToLocalPath'];
 							$dlPromise = $this->downloadImageAsync($dlUrl, $destPath);
 						} else {
 							$dlPromise = $this->downloadImageBufferAsync($dlUrl);
 						}
+						echo "before waiting for dl promise" . $dlUrl . "\n";
 						$dlResult = $dlPromise->wait();
+						echo "after waiting for dl promise" . $dlUrl . "\n";
 
 						$deleteBody = ['images' => array_map(function ($dest) {
 							return $dest['fileId'];
 						}, array_filter($outputApiImages, function ($dest) {
 							return isset($dest['fileId']);
 						}))];
-		
+
 						$deletePromise = $this->client->deleteAsync($deleteUrl, [
 							'headers' => [
 								'Content-Type' => 'application/json',
@@ -290,7 +294,6 @@ class Scaler
 						// 	],
 						// ]);
 						echo "after inner resolve\n";
-		
 					});
 					$promises[] = $finalPromise;
 				} else {
@@ -298,7 +301,10 @@ class Scaler
 				}
 			}
 
-			$responses = PromiseUtils::unwrap($promises);
+			echo "we are before unwrapping promises\n";
+			$responses = PromiseUtils::settle($promises)->wait();
+			echo "we are after unwrapping promises\n";
+			echo "responses are " . json_encode($responses) . "\n";
 
 			$getImagesMs = $apiTimeStats['uploadImagesMs'] ?? (microtime(true) - $startGetImages) * 1000;
 			$totalMs = (microtime(true) - $start) * 1000;
