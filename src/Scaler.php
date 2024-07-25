@@ -51,7 +51,7 @@ class Scaler
 		}, $outputs);
 
 		$options2 = [
-			'input' => $options['input']['remoteUrl'] ?? 'body',
+			'input' => $this->getInputScheme($options['input']),
 			'output' => $apiOutputs,
 		];
 
@@ -252,4 +252,25 @@ class Scaler
 
 		return ['image' => $res->getBody()->getContents()];
 	}
+
+	private function getInputScheme($inputOptions) {
+		if (isset($inputOptions['remoteUrl']) && !empty($inputOptions['remoteUrl'])) {
+			 return $inputOptions['remoteUrl'];
+		}
+		
+		if (isset($inputOptions['localPath']) && !empty($inputOptions['localPath'])) {
+			 $fileName = basename($inputOptions['localPath']);
+			 return 'body:' . $fileName;
+		}
+		
+		if (isset($inputOptions['buffer']) && !empty($inputOptions['buffer']) &&
+			 isset($inputOptions['fileName']) && !empty($inputOptions['fileName'])) {
+			 return 'body:' . $inputOptions['fileName'];
+		}
+		
+		if (isset($inputOptions['buffer']) && !empty($inputOptions['buffer'])) {
+			 return 'body';
+		}
+		throw new Exception('No input provided');
+  }
 }
