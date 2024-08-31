@@ -1,6 +1,6 @@
 {
 	"name": "scaler/scaler",
-	"description": "Scaler.pics API helper library for efficient transforming photos and images",
+	"description": "Scaler.pics API for efficient photo and image resizing, conversion and document thumbnail generation.",
 	"type": "library",
 	"keywords": [
 		"image",
